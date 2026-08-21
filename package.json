@@ -1,0 +1,29 @@
+{
+  "name": "@linxin666/dsh-api-visualizer",
+  "description": "API capture visualizer for the dsh web GUI: a sidebar entry plus a live panel showing API-call records the agent captures from the client process (method / url / status / duration / headers / bodies / notes). Records are appended to a JSONL store via the api_capture_append agent tool or the /api/dsh-api-visualizer/ingest route; the panel polls and renders them. No dsh source changes.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./lib/*": "./lib/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "url": "https://github.com/lemonmmice/dsh-api-visualizer.git",
+    "type": "git"
+  },
+  "dependencies": {
+    "node-forge": "^1.3.1"
+  }
+}

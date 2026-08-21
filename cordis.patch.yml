@@ -1,0 +1,9 @@
+# dsh-api-visualizer bundle patch: inserts the dual-face plugin row into the
+# web profile roster. The node half (exports ".") runs in the host process
+# (JSONL store, /api/dsh-api-visualizer route family, api_capture_append
+# agent tool, system-prompt announcement); the `dsh.client` declaration in
+# package.json makes the browser half (exports "./client", served at
+# /plugins/<id>/client.js) load in the web GUI.
+- insert:
+    - id: api-visualizer
+      name: '@linxin666/dsh-api-visualizer'

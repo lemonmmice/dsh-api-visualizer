@@ -1,0 +1,5 @@
+node_modules/
+*.log
+*.jsonl
+proxy-certs/
+.DS_Store
