@@ -17,9 +17,46 @@ dsh-api-visualizer/
 │   ├── proxy-engine.mjs  # 本地 MITM 代理：HTTP 明文 + HTTPS CONNECT 按域签发证书 + 上游代理链 + 系统代理切换
 │   ├── client.js         # 浏览器侧：侧边栏「接口捕获」入口 + 面板（纯 DOM，捕获中 1s / 平时 2.5s 轮询）
 │   └── scripts/
-│       └── clean-capture-logs.ps1  # 清除日志按钮调用的清理脚本（%TEMP% 跟踪日志 + 抓包目录 *.log）
+│       ├── clean-capture-logs.ps1  # 清除日志按钮调用的清理脚本（%TEMP% 跟踪日志 + 抓包目录 *.log）
+│       └── install.ps1             # 同事一键安装脚本（下载 + 解压 + 注册两个插件）
 └── README.md
 ```
+
+## 安装（同事 / 新机器）
+
+前提：已安装 DSH（`dsh` 命令可用），PowerShell 5+。
+
+**方式 A：一键脚本**（推荐；自动下载两个插件、解压进 profile 并写入注册，装完重启 DSH）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/lemonmmice/dsh-api-visualizer/main/scripts/install.ps1 | iex"
+```
+
+**方式 B：命令行**（用 DSH 自带的 pnpm 包装器）：
+
+```sh
+dsh plugin --profile web add github:lemonmmice/dsh-api-visualizer
+dsh plugin --profile web add github:lemonmmice/dsh-postman
+```
+
+然后在 profile 的 `cordis.patch.yml`（如 `~/.dsh/profiles/web/cordis.patch.yml`）追加注册块：
+
+```yaml
+- insert:
+    - id: api-visualizer
+      name: '@linxin666/dsh-api-visualizer'
+
+- insert:
+    - id: postman
+      name: '@linxin666/dsh-postman'
+```
+
+重启 DSH、刷新页面后侧边栏出现「接口捕获」与「接口调试」入口。
+
+> 方式 B 中 postman 安装可能因 pnpm 供应链策略报 `ERR_PNPM_IGNORED_BUILDS`
+> （其依赖 protobufjs 带安装脚本）：按提示把打印的键（如 `protobufjs@7.6.5`）加进
+> profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可；protobufjs 的安装脚本
+> 对功能无影响，跳过也不影响使用。
 
 ## 使用方式
 
