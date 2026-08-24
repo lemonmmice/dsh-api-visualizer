@@ -58,6 +58,13 @@ dsh plugin --profile web add github:lemonmmice/dsh-postman
 > profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可；protobufjs 的安装脚本
 > 对功能无影响，跳过也不影响使用。
 
+## 环境变量
+
+- `DSH_API_CAPTURE_STORE` — 记录库目录（缺省 `~/.dsh/api-capture`，按天分片）；
+- `DSH_API_SRC_ROOT` — 客户端源码根目录，「定位源码」在此查找 .cs 定义（多根用 `;` 分隔；缺省无，需自行设置）；
+- `DSH_CODE_EXE` — VS Code 可执行文件路径（缺省探测常见安装路径）；
+- `DSH_CAPTURE_LOG` / `DSH_CAPTURE_CALLER_LOG` — 跟踪日志 / 调用方日志路径（缺省 `%TEMP%\uiprobe-net-trace.log` / `uiprobe-caller.log`）。
+
 ## 使用方式
 
 1. **重启 DSH**（插件注册与 client.js 加载在启动时生效），侧边栏出现「接口捕获」入口。
@@ -70,16 +77,28 @@ dsh plugin --profile web add github:lemonmmice/dsh-postman
 ## API（host 侧，loopback-only）
 
 - `GET  /api/dsh-api-visualizer/stats` — 总数/方法/状态/来源/域名分布
-- `GET  /api/dsh-api-visualizer/records?limit&offset&q&method&source&status&includeBody` — 列表
+- `GET  /api/dsh-api-visualizer/records?limit&offset&cursor&q&method&source&status&includeBody` — 列表
 - `GET  /api/dsh-api-visualizer/records/{id}` — 单条完整记录（含请求/响应体）
 - `POST /api/dsh-api-visualizer/ingest` — 追加记录（单批 ≤ 500 条）
 - `DELETE /api/dsh-api-visualizer/records` — 清空
-- `POST /api/dsh-api-visualizer/capture/start` — 开始实时捕获（body 可选 `{logPath, replay}`）
+- `POST /api/dsh-api-visualizer/capture/start` — 开始实时捕获（body 可选 `{logPath, replay}`；日志 >300MB 自动轮转）
 - `POST /api/dsh-api-visualizer/capture/stop` — 停止实时捕获
 - `GET  /api/dsh-api-visualizer/capture/status` — 引擎状态 + 实时入库计数
+- `POST /api/dsh-api-visualizer/capture/rotate` — 轮转 trace/caller 日志（改名 .bak + 按 keepDays 清理归档）
+- `GET  /api/dsh-api-visualizer/stats/timeline|sessions|endpoints|repeats` — 时间分桶/会话聚合/端点聚合/高频重复检测
+- `POST /api/dsh-api-visualizer/baseline/save|diff`、`GET /baseline/list`、`DELETE /baseline/{name}` — 契约基线
+- `POST /api/dsh-api-visualizer/source/locate`、`POST /source/open` — 调用方源码定位与打开
+- `GET/POST/DELETE /api/dsh-api-visualizer/proxy/rules` — AutoResponder 规则引擎（mock/延迟/阻断/重写状态码）
 
 记录字段：`id, ts, source, process, method, url, status, durationMs, reqHeaders, reqBody, resHeaders, resBody, note`
-（reqBody/resBody 每字段截断 ≤ 2MB，超出附 `…(截断)` 后缀）。
+（reqBody/resBody 每字段截断 ≤ 2MB，超出附 `…(截断)` 后缀）。代理流量额外带 `connectMs/tlsMs/ttfbMs`
+分段耗时；实时流量带调用方归因 `caller{vm,view,api,trig,stack}`。存储按天分片 `records-YYYYMMDD.jsonl`
+（全局上限 20000 条，旧单文件自动迁移）。
+
+## Agent 工具
+
+- `api_capture_append` — 追加记录
+- `api_capture_query` — 查询/过滤已捕获记录（q/method/source/status/host/minDurationMs/errors/caller 等，返回调用方归因）
 
 ## 抓取侧（实时引擎）
 
@@ -107,9 +126,38 @@ gzip 响应自动解包（多 member 容错）。日志与记录含真实 token�
   公司内网/代理环境下照常工作（`/proxy/start` 可用 `{upstream}` 覆盖，`null` 直连）；
 - **系统代理一键切换**：「设为系统代理」把 WinINET 代理指向本代理并广播刷新，
   再点恢复原值（含 ProxyOverride）；
-- 依赖 `node-forge`（生成证书），记录同 `records.jsonl`（body ≤ 2MB）；
-- 边界：WebSocket 升级暂不解析（返回 502）；对目标站点的 TLS 校验关闭（抓包工具的常见取舍）。
+- 依赖 `node-forge`（生成证书），记录同 records.jsonl（body ≤ 2MB）；
+- 边界：对目标站点的 TLS 校验关闭（抓包工具的常见取舍）。
+
+### AutoResponder 规则引擎
+
+规则存于 `proxy-rules.json`，经面板「代理规则」或 `/proxy/rules` 管理，对本地代理流量即时生效：
+
+- **mock**：直接回包（状态码/头/体可配），不请求上游——伪造行情、mock 错误场景；
+- **delay**：转发前等待 latencyMs——模拟慢网/慢接口，验证客户端超时与加载态；
+- **block**：断开连接，不请求上游；
+- **rewrite-status**：正常转发但改写响应状态码——验证客户端对错误码的容错。
+
+匹配：方法 + 域名 + URL（包含/通配 `*`/正则），按顺序第一条命中生效；命中数持久化统计。
+仅对 HTTP(S) 流量生效（不含 WebSocket）。
+
+### WebSocket 抓取
+
+代理对 `Upgrade: websocket` 同样接管（ws:// 直连代理、wss:// 走 CONNECT 隧道）：记录 101 握手、
+双向帧统计（c2s 掩码 / s2c 明文，文本帧 utf-8 解码、分片重组、close 码）、收发字节与首字节耗时，
+入库为 `method=WS` 的记录（reqBody=客户端首个文本消息，resBody=服务端文本累计，ws.frames 保留前 300 帧）。
+
+### 面板扩展视图
+
+- **瀑布图**：请求级时间轴（横条=总耗时，绿段=等待响应 TTFB，蓝段=传输），点击开详情；
+- **重复检测**：同一「方法+路径」在 10s 窗口 ≥5 次即上榜（定时器风暴特征），点击行过滤该接口；
+- **基线管理**：把当前筛选的接口契约（状态码/Content-Type/响应 JSON 字段结构）存为基线，
+  之后一键对比新增/缺失端点与字段级变化；
+- **定位源码**：详情抽屉按调用方归因（ViewModel/API 方法）在客户端源码中定位 .cs 定义，
+  一键在 VS Code 打开（带行号）；源码根由环境变量 `DSH_API_SRC_ROOT` 指定（多根用 `;` 分隔），
+  VS Code 可执行文件可用 `DSH_CODE_EXE` 指定（缺省探测常见安装路径，失败回退资源管理器定位）；
+- **轮转日志**：把 %TEMP% 的跟踪/调用方日志改名归档并按保留期清理（捕获中自动先停再启）。
 
 控制路由（loopback-only）：`POST /proxy/start {port,upstream}`、`POST /proxy/stop`、
 `GET /proxy/status`、`GET /proxy/ca-cert.der`（证书下载）、`POST /proxy/install-ca`、
-`POST /proxy/system-proxy {enable}`。
+`POST /proxy/system-proxy {enable}`、`GET/POST/DELETE /proxy/rules`。
